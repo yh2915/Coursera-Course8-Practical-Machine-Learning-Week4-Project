@@ -1,0 +1,158 @@
+---
+title: "Practical Machine Learning Project"
+author: "YH"
+date: "06/12/2019"
+output: html_document
+---
+
+## Background
+
+##### Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+##### The training data for this project are available here:
+##### https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+##### The test data are available here:
+##### https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Goal
+##### Predict the manner in which people did the exercise
+
+### Requirement
+#####  create a report describing 
+##### a. how you built your model
+##### b. what you think the expected out of sample error is
+##### c. how you used cross validation
+##### d. why you made the choices you did.
+
+
+
+# Main report
+## a.Model building
+#### Setup and cleaning data
+
+```{r Setup,results='hide'}
+#Load library
+library("caret")
+library("gridExtra")
+library("ggplot2")
+
+set.seed(420)
+
+#read data
+data0<-read.csv("pml-training.csv")
+
+#Clean out irrelevant variables
+nsv<-nearZeroVar(data0,saveMetrics = TRUE)
+var_true<-row.names(nsv[nsv$nzv==FALSE,])
+data1<-data0[,var_true]
+
+
+#Clean out columns contain NA
+good_data<-data1[colSums(is.na(data1))==0]
+var_nona<-colnames(good_data)
+data2<-data1[,var_nona]
+data3<-data2[,-c(1:6)]
+var_intest<-var_nona[-c(1:6)]
+```
+
+##### After I checked the dataset, I realized that the dataset contains 160 variables. However, not all of them are useful for building the model. Therefore:
+##### 1) I first run nearZeroValue function to get rid of irrelevant variables. 
+##### 2) I deleted columns contain too many "NA" values.
+##### 3) I deleted columns irrelevant to the movement
+##### Now, we are only left with 53 variables.  
+
+
+#### Subsetting data
+```{r Subset}
+inTrain<-createDataPartition(data3$classe,p=0.75,list=FALSE)
+training<-data3[inTrain,]
+testing<-data3[-inTrain,]
+```
+###### Here, I divided the data into training data and test data. This step is necessary for cross-validation in the later stage  
+
+
+#### Explore dataset
+###### Here, I try to explore the information contained in the dataset.
+
+```{r Explore,echo=FALSE}
+#count number of variable sets with "x,y,z" information
+grepx<-grep("_x",var_intest)
+cols<-c("lightpink","lightgoldenrod","powderblue")
+g0<-ggplot(data=training)
+grepx<-as.numeric(grepx)
+plot<-list()
+for(i in 1:length(grepx)){
+  n<-grepx[i]
+  g1<-NULL
+  g1<-g0 +
+      geom_density(aes_(x=training[,n],color="x"),data=training,size=1) +
+      geom_density(aes_(x=training[,n+1],color="y"),data=training,size=1) +
+      geom_density(aes_(x=training[,n+2],color="z"),data=training,size=1) +
+      scale_color_manual("",values=cols) +
+      xlab("") +
+      ggtitle(substr(var_nona[n],1,nchar(var_nona[n])-2)) +
+     theme(plot.title = element_text(hjust = 0.5))
+plot[[i]]<-g1
+}
+grid.arrange(grobs=plot,ncol=4)
+
+```
+
+#### Fit models
+```{r Fit models,error=FALSE,warning=FALSE}
+modelFit_rf<-train(classe~.,method="rf",data=training)
+modelFit_gbm<-train(classe~.,method="gbm",verbose=FALSE, data=training)
+modelFit_lda<-train(classe~.,method="lda", data=training)
+```
+
+```{r Evaluate accuracy}
+modelFit_rf$results
+modelFit_gbm$results
+modelFit_lda$results
+```
+###### As we can see from the result, model trained with "Random forest" gives the highest accuracy
+
+## b.Cross-validation on testing samples
+```{r Matrix}
+predict_rf<-predict(modelFit_rf,newdata=testing)
+predict_gbm<-predict(modelFit_gbm,newdata=testing)
+predict_lda<-predict(modelFit_lda,newdata=testing)
+matrix_rf<-confusionMatrix(predict_rf,testing$classe)
+matrix_gbm<-confusionMatrix(predict_gbm,testing$classe)
+matrix_lda<-confusionMatrix(predict_lda,testing$classe)
+matrix_rf$table
+matrix_gbm$table
+matrix_lda$table
+```
+
+##### We used random sampling to create a testing sample set as demonstrated earlier. Here we use the model generated to predict the outcomes of testing sample. As we can see from the table, the model trained with random forest gives the best prediction results on the test sample
+
+## c. Expected out of sample error
+```{r OOS error}
+matrix_rf$byClass
+matrix_gbm$byClass
+matrix_lda$byClass
+```
+
+##### From the table above, we can see the model trained with random forest give the best sensitivity and specificity. The out of sample error is the error when the model applied on a new dataset, which can be obtained by 1-accuracy (obtained in the confusionMatrix, not shown here)
+##### The error rate of the model trained with rf is 1-0.9949=0.005
+##### The error rate of the model trained with rf is 1-0.9649=0.0351
+##### The error rate of the model trained with lda is 1-0.6931=0.3069
+
+## d. Choose the best model
+##### I decided to choose the model trained with Random forest for my prediction due to its high accuracy
+##### However, we also need to bare in mind that this model takes long time to run, and there is a risk of being overfitting.
+
+# Prediction on 20 testing samples
+```{r Prediction}
+#Load data
+data_testing<-read.csv("pml-testing.csv")
+
+#Make prediction
+predict(modelFit_rf,newdata=data_testing)
+
+```
+
+##### The prediction outcome based on my model is above.
+##### .
+
